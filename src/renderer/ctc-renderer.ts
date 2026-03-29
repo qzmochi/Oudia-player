@@ -161,35 +161,38 @@ export class CTCRenderer {
       }
 
       // 番線の Y オフセットを計算
-      // downMain を下り線(下)の位置、upMain を上り線(上)の位置に配置
-      // その他の番線は間に配置
+      // 左側通行: Kudari(下り)=上線路, Nobori(上り)=下線路
+      //   → DownMain = 上側 (負), UpMain = 下側 (正)
       const offsets: number[] = new Array(trackCount).fill(0);
-
-      // 本線の位置を基準に配置
-      // upMain → upTrackY 相当 (負方向), downMain → downTrackY 相当 (正方向)
       const halfGap = doubleTrackGap / 2;
-      offsets[upMain] = -halfGap;
-      offsets[downMain] = halfGap;
 
-      // 本線が同じ場合（単線駅）
       if (upMain === downMain) {
-        offsets[upMain] = 0;
-      }
+        // 単線駅: 全番線を中央付近に配置
+        for (let t = 0; t < trackCount; t++) {
+          offsets[t] = (t - (trackCount - 1) / 2) * platformSpacing;
+        }
+      } else {
+        // 複線駅: DownMain=上側, UpMain=下側
+        offsets[downMain] = -halfGap;
+        offsets[upMain] = halfGap;
 
-      // その他の番線を配置
-      for (let t = 0; t < trackCount; t++) {
-        if (t === downMain || t === upMain) continue;
-        // 本線の外側に配置
-        if (t < Math.min(downMain, upMain)) {
-          // 上り本線より上
-          offsets[t] = offsets[upMain] - platformSpacing * (Math.min(downMain, upMain) - t);
-        } else if (t > Math.max(downMain, upMain)) {
-          // 下り本線より下
-          offsets[t] = offsets[downMain] + platformSpacing * (t - Math.max(downMain, upMain));
-        } else {
-          // 本線の間
-          const ratio = (t - upMain) / (downMain - upMain);
-          offsets[t] = offsets[upMain] + (offsets[downMain] - offsets[upMain]) * ratio;
+        for (let t = 0; t < trackCount; t++) {
+          if (t === downMain || t === upMain) continue;
+
+          const mainMin = Math.min(downMain, upMain);
+          const mainMax = Math.max(downMain, upMain);
+
+          if (t < mainMin) {
+            // 両本線より上
+            offsets[t] = offsets[mainMin] - platformSpacing * (mainMin - t);
+          } else if (t > mainMax) {
+            // 両本線より下
+            offsets[t] = offsets[mainMax] + platformSpacing * (t - mainMax);
+          } else {
+            // 本線の間: 線形補間
+            const ratio = (t - downMain) / (upMain - downMain);
+            offsets[t] = offsets[downMain] + (offsets[upMain] - offsets[downMain]) * ratio;
+          }
         }
       }
 
@@ -285,14 +288,22 @@ export class CTCRenderer {
       ctx.strokeStyle = isMain ? config.trackColorMain : config.trackColor;
       ctx.lineWidth = isMain ? config.mainTrackWidth : config.sideTrackWidth;
 
-      // 左側分岐: 駅間の本線位置 → 番線位置
-      const entryFromY = isDownMain || (station.downMain === station.upMain && t === station.downMain)
-        ? this.downTrackY
-        : isUpMain
-        ? this.upTrackY
-        : trackY < 0
-        ? this.upTrackY
-        : this.downTrackY;
+      // 分岐元の Y を決定
+      // DownMain → 上線路(upTrackY)から分岐, UpMain → 下線路(downTrackY)から分岐
+      let entryFromY: number;
+      if (station.downMain === station.upMain) {
+        // 単線駅: 中央から分岐
+        entryFromY = centerY;
+      } else if (isDownMain) {
+        entryFromY = this.upTrackY; // 下り本線 = 上線路
+      } else if (isUpMain) {
+        entryFromY = this.downTrackY; // 上り本線 = 下線路
+      } else {
+        // 副本線: 近い方の本線から分岐
+        const distToUp = Math.abs(trackY - this.upTrackY);
+        const distToDown = Math.abs(trackY - this.downTrackY);
+        entryFromY = distToUp < distToDown ? this.upTrackY : this.downTrackY;
+      }
 
       ctx.beginPath();
       // 左側分岐

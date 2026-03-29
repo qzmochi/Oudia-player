@@ -9,7 +9,10 @@ interface TrainSegment {
   endTime: number;
 }
 
+/** 終着駅での滞留表示時間（分） */
 const TERMINAL_DWELL_MINUTES = 3;
+/** 停車駅でのデフォルト最小停車時間（分）— 着=発 or 発のみの場合に適用 */
+const MIN_STOP_DWELL_MINUTES = 0.5;
 
 /**
  * 列車の運行セグメントを事前計算する。
@@ -76,9 +79,10 @@ function getTrainPosition(
   const firstSeg = segments[0];
   const lastSeg = segments[segments.length - 1];
 
-  // 始発駅の最初の時刻
+  // 始発駅: arrival があればそこから、なければ発車の少し前から表示
   const firstStopTime = train.stationTimes[firstSeg.startIdx];
-  const trainStart = firstStopTime?.arrival ?? firstStopTime?.departure ?? firstSeg.startTime;
+  const trainStart = firstStopTime?.arrival
+    ?? (firstSeg.startTime - MIN_STOP_DWELL_MINUTES);
 
   const trainEnd = lastSeg.endTime + TERMINAL_DWELL_MINUTES;
 
@@ -108,10 +112,11 @@ function getTrainPosition(
   for (let i = 0; i < segments.length; i++) {
     const seg = segments[i];
 
-    // セグメント間の停車
+    // セグメント間の停車（着=発でも最小停車時間を確保）
     if (i > 0) {
       const prevSeg = segments[i - 1];
-      if (currentTime >= prevSeg.endTime && currentTime < seg.startTime) {
+      const dwellEnd = Math.max(seg.startTime, prevSeg.endTime + MIN_STOP_DWELL_MINUTES);
+      if (currentTime >= prevSeg.endTime && currentTime < dwellEnd) {
         return {
           train,
           stationProgress: seg.startIdx,
