@@ -1,0 +1,113 @@
+{
+  "$schema": "../docs/specs/route-extension-schema.json",
+  "description": "仙山線の拡張配線情報",
+  "trackType": "single",
+  "comment": "仙山線は全線単線",
+  "sections": [
+    {
+      "from": "仙台",
+      "to": "東照宮",
+      "tracks": 1,
+      "note": "単線"
+    },
+    {
+      "from": "東照宮",
+      "to": "北仙台",
+      "tracks": 1
+    },
+    {
+      "from": "北仙台",
+      "to": "北山",
+      "tracks": 1
+    },
+    {
+      "from": "北山",
+      "to": "東北福祉大前",
+      "tracks": 1
+    },
+    {
+      "from": "東北福祉大前",
+      "to": "国見",
+      "tracks": 1
+    },
+    {
+      "from": "国見",
+      "to": "葛岡",
+      "tracks": 1
+    },
+    {
+      "from": "葛岡",
+      "to": "陸前落合",
+      "tracks": 1
+    },
+    {
+      "from": "陸前落合",
+      "to": "愛子",
+      "tracks": 1
+    },
+    {
+      "from": "愛子",
+      "to": "陸前白沢",
+      "tracks": 1
+    },
+    {
+      "from": "陸前白沢",
+      "to": "熊ケ根",
+      "tracks": 1
+    },
+    {
+      "from": "熊ケ根",
+      "to": "作並",
+      "tracks": 1
+    },
+    {
+      "from": "作並",
+      "to": "奥新川",
+      "tracks": 1
+    },
+    {
+      "from": "奥新川",
+      "to": "面白山（信）",
+      "tracks": 1
+    },
+    {
+      "from": "面白山（信）",
+      "to": "面白山高原",
+      "tracks": 1
+    },
+    {
+      "from": "面白山高原",
+      "to": "山寺",
+      "tracks": 1
+    },
+    {
+      "from": "山寺",
+      "to": "高瀬",
+      "tracks": 1
+    },
+    {
+      "from": "高瀬",
+      "to": "楯山",
+      "tracks": 1
+    },
+    {
+      "from": "楯山",
+      "to": "羽前千歳",
+      "tracks": 1
+    },
+    {
+      "from": "羽前千歳",
+      "to": "北山形",
+      "tracks": 1
+    },
+    {
+      "from": "北山形",
+      "to": "山形",
+      "tracks": 1
+    }
+  ],
+  "directionLabels": {
+    "kudari": "山形方面（下り）",
+    "nobori": "仙台方面（上り）"
+  }
+}
