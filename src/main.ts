@@ -1,5 +1,5 @@
 import { parseOudiaFile } from "./parser/oud-parser";
-import { CTCRenderer, type TrainPosition } from "./renderer/ctc-renderer";
+import { CTCRenderer, type TrainPosition, type TrainLabelMode } from "./renderer/ctc-renderer";
 import { SimulationEngine } from "./simulation/engine";
 import { StopType } from "./model/types";
 import type { Route } from "./model/types";
@@ -18,6 +18,7 @@ const timeDisplay = document.getElementById("time-display") as HTMLSpanElement;
 const routeInfo = document.getElementById("route-info") as HTMLSpanElement;
 const trainCountEl = document.getElementById("train-count") as HTMLSpanElement;
 const trainInfoPanel = document.getElementById("train-info") as HTMLDivElement;
+const btnLabelMode = document.getElementById("btn-label-mode") as HTMLButtonElement;
 
 // ---- state ----
 
@@ -214,6 +215,14 @@ btnFaster.addEventListener("click", () => {
 
 timeSlider.addEventListener("input", () => {
   currentTime = parseFloat(timeSlider.value);
+  renderFrame();
+});
+
+btnLabelMode.addEventListener("click", () => {
+  if (!renderer) return;
+  const next: TrainLabelMode = renderer.labelMode === "number" ? "type" : "number";
+  renderer.labelMode = next;
+  btnLabelMode.textContent = next === "number" ? "番号" : "種別";
   renderFrame();
 });
 

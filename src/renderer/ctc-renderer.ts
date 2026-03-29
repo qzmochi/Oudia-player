@@ -36,6 +36,9 @@ const DEFAULT_CONFIG: CTCRendererConfig = {
   stationLabelColor: "#cccccc",
 };
 
+/** 列車標識の表示モード */
+export type TrainLabelMode = "number" | "type";
+
 /** 列車の現在位置 */
 export interface TrainPosition {
   train: Train;
@@ -62,12 +65,10 @@ export class CTCRenderer {
   private route: Route | null = null;
 
   private stationX: number[] = [];
-  /** 上り線の Y（上に表示） */
   private upTrackY = 0;
-  /** 下り線の Y（下に表示） */
   private downTrackY = 0;
-  /** 駅マーカーの中心 Y */
   private centerY = 0;
+  private _labelMode: TrainLabelMode = "number";
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -80,6 +81,14 @@ export class CTCRenderer {
   setRoute(route: Route): void {
     this.route = route;
     this.layoutStations();
+  }
+
+  set labelMode(mode: TrainLabelMode) {
+    this._labelMode = mode;
+  }
+
+  get labelMode(): TrainLabelMode {
+    return this._labelMode;
   }
 
   private layoutStations(): void {
@@ -242,10 +251,11 @@ export class CTCRenderer {
     return x0 + (x1 - x0) * frac;
   }
 
-  /** 列車の Y 座標を取得（上り=上, 下り=下） */
+  /** 列車の Y 座標を取得（左側通行: 右行き=上線路, 左行き=下線路） */
   private getTrainY(direction: "Kudari" | "Nobori"): number {
-    // Kudari(下り) → 下の線路, Nobori(上り) → 上の線路
-    return direction === "Kudari" ? this.downTrackY : this.upTrackY;
+    // Kudari = 駅インデックス昇順 = 右方向(→) = 上の線路
+    // Nobori = 駅インデックス降順 = 左方向(←) = 下の線路
+    return direction === "Kudari" ? this.upTrackY : this.downTrackY;
   }
 
   /** 1つの列車標識を描画 */
@@ -259,8 +269,8 @@ export class CTCRenderer {
 
     const x = this.getTrainX(pos.stationProgress);
     const baseY = this.getTrainY(train.direction);
-    // 列車標識を線路から少しオフセット
-    const labelOffset = train.direction === "Kudari" ? 14 : -14;
+    // 列車標識を線路から外側にオフセット（Kudari=上線路→さらに上, Nobori=下線路→さらに下）
+    const labelOffset = train.direction === "Kudari" ? -14 : 14;
     const y = baseY + labelOffset;
 
     const w = config.trainLabelWidth;
@@ -296,15 +306,24 @@ export class CTCRenderer {
     ctx.fill();
     ctx.globalAlpha = 1.0;
 
-    // 列車番号テキスト
-    ctx.font = `bold ${config.trainFontSize}px monospace`;
+    // テキスト
     ctx.fillStyle = "#ffffff";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    const label = train.number ?? "?";
-    // 矢印の分だけテキストを少しずらす
     const textOffsetX = isRight ? -arrowW / 2 : arrowW / 2;
-    ctx.fillText(label, x + textOffsetX, y);
+
+    if (this._labelMode === "type") {
+      // 種別行先モード: 種別略称 + 行先
+      const typeName = trainType?.shortName ?? trainType?.name ?? "";
+      const shortType = typeName.length > 3 ? typeName.slice(0, 3) : typeName;
+      ctx.font = `bold ${config.trainFontSize - 1}px sans-serif`;
+      ctx.fillText(shortType, x + textOffsetX, y);
+    } else {
+      // 列車番号モード
+      ctx.font = `bold ${config.trainFontSize}px monospace`;
+      const label = train.number ?? "?";
+      ctx.fillText(label, x + textOffsetX, y);
+    }
   }
 
   /** 指定座標にある列車を返す（クリック判定） */
@@ -321,7 +340,7 @@ export class CTCRenderer {
       const train = pos.train;
       const x = this.getTrainX(pos.stationProgress);
       const baseY = this.getTrainY(train.direction);
-      const labelOffset = train.direction === "Kudari" ? 14 : -14;
+      const labelOffset = train.direction === "Kudari" ? -14 : 14;
       const y = baseY + labelOffset;
 
       if (
