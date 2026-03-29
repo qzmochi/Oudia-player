@@ -202,9 +202,10 @@ function convertTrainType(node: RawNode): TrainType {
   };
 }
 
-function convertTrain(node: RawNode): Train {
+function convertTrain(node: RawNode, stationCount: number): Train {
+  const direction = (prop(node, "Houkou") as "Kudari" | "Nobori") ?? "Kudari";
   const ekiJikoku = prop(node, "EkiJikoku") ?? "";
-  const stationTimes = parseEkiJikoku(ekiJikoku);
+  let stationTimes = parseEkiJikoku(ekiJikoku);
 
   // RessyaTrack があれば番線情報をマージ
   const ressyaTrack = prop(node, "RessyaTrack");
@@ -217,8 +218,18 @@ function convertTrain(node: RawNode): Train {
     }
   }
 
+  // 上り列車の EkiJikoku は駅順が逆なので反転し、
+  // stationTimes[i] が stations[i] に対応するようにする
+  if (direction === "Nobori") {
+    // 駅数に合わせてパディング
+    while (stationTimes.length < stationCount) {
+      stationTimes.push({ stopType: StopType.NotOperate });
+    }
+    stationTimes = stationTimes.slice(0, stationCount).reverse();
+  }
+
   return {
-    direction: (prop(node, "Houkou") as "Kudari" | "Nobori") ?? "Kudari",
+    direction,
     typeIndex: propInt(node, "Syubetsu") ?? 0,
     number: prop(node, "Ressyabangou"),
     name: prop(node, "Ressyamei"),
@@ -228,23 +239,29 @@ function convertTrain(node: RawNode): Train {
   };
 }
 
-function convertDiagram(node: RawNode): Diagram {
+function convertDiagram(node: RawNode, stationCount: number): Diagram {
   const kudari = firstChild(node, "Kudari");
   const nobori = firstChild(node, "Nobori");
 
   return {
     name: prop(node, "DiaName") ?? "",
-    downTrains: kudari ? childrenOf(kudari, "Ressya").map(convertTrain) : [],
-    upTrains: nobori ? childrenOf(nobori, "Ressya").map(convertTrain) : [],
+    downTrains: kudari
+      ? childrenOf(kudari, "Ressya").map((n) => convertTrain(n, stationCount))
+      : [],
+    upTrains: nobori
+      ? childrenOf(nobori, "Ressya").map((n) => convertTrain(n, stationCount))
+      : [],
   };
 }
 
 function convertRoute(node: RawNode): Route {
+  const stations = childrenOf(node, "Eki").map(convertStation);
+  const stationCount = stations.length;
   return {
     name: prop(node, "Rosenmei") ?? "",
-    stations: childrenOf(node, "Eki").map(convertStation),
+    stations,
     trainTypes: childrenOf(node, "Ressyasyubetsu").map(convertTrainType),
-    diagrams: childrenOf(node, "Dia").map(convertDiagram),
+    diagrams: childrenOf(node, "Dia").map((n) => convertDiagram(n, stationCount)),
     comment: prop(node, "Comment"),
     startTime: prop(node, "KitenJikoku")
       ? parseTime(prop(node, "KitenJikoku")!)

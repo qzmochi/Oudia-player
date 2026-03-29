@@ -15,12 +15,14 @@ interface TrainSegment {
 
 /**
  * 列車の運行セグメント（駅間ごとの発着時刻）を事前計算する。
+ * パーサーで上り列車の stationTimes は反転済みなので、
+ * stationTimes[i] は stations[i] に対応する。
+ * ただし上りは時刻が降順になるため、時刻順にソートして処理する。
  */
 function buildSegments(train: Train, stationCount: number): TrainSegment[] {
   const segments: TrainSegment[] = [];
   const times = train.stationTimes;
 
-  // 有効な駅（運行あり）のリストを作る
   interface StopInfo {
     stationIdx: number;
     arrivalTime: number | undefined;
@@ -40,17 +42,23 @@ function buildSegments(train: Train, stationCount: number): TrainSegment[] {
     });
   }
 
+  // 時刻順にソート（上り列車は駅インデックスと時刻順が逆）
+  stops.sort((a, b) => {
+    const tA = a.departureTime ?? a.arrivalTime ?? 0;
+    const tB = b.departureTime ?? b.arrivalTime ?? 0;
+    return tA - tB;
+  });
+
   // 連続する停車駅間のセグメントを生成
   for (let i = 0; i < stops.length - 1; i++) {
     const from = stops[i];
     const to = stops[i + 1];
 
-    // 発時刻: from の departure (なければ arrival)
     const startTime = from.departureTime ?? from.arrivalTime;
-    // 着時刻: to の arrival (なければ departure)
     const endTime = to.arrivalTime ?? to.departureTime;
 
     if (startTime === undefined || endTime === undefined) continue;
+    if (endTime <= startTime) continue; // 不正なセグメントをスキップ
 
     segments.push({
       startIdx: from.stationIdx,
