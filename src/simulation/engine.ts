@@ -2,70 +2,62 @@ import type { Route, Train } from "../model/types";
 import { StopType } from "../model/types";
 import type { TrainPosition } from "../renderer/ctc-renderer";
 
-/**
- * 列車の運行区間を表す。
- * startIdx/endIdx は駅インデックス、startTime/endTime は分単位。
- */
 interface TrainSegment {
   startIdx: number;
   endIdx: number;
-  startTime: number; // 分単位
+  startTime: number;
   endTime: number;
 }
 
-/** 終着駅での滞留表示時間（分） */
 const TERMINAL_DWELL_MINUTES = 3;
 
 /**
- * 列車の運行セグメント（駅間ごとの発着時刻）を事前計算する。
- * パーサーで上り列車の stationTimes は反転済みなので、
- * stationTimes[i] は stations[i] に対応する。
+ * 列車の運行セグメントを事前計算する。
+ *
+ * パーサーで上り列車の stationTimes は反転済み:
+ *   stationTimes[i] は stations[i] に対応する。
+ *
+ * 下り: 駅インデックス昇順に時刻が増加 → そのまま正方向に走査
+ * 上り: 駅インデックス降順に時刻が増加 → 逆方向に走査
  */
 function buildSegments(train: Train, stationCount: number): TrainSegment[] {
   const segments: TrainSegment[] = [];
   const times = train.stationTimes;
+  const isNobori = train.direction === "Nobori";
 
-  interface StopInfo {
-    stationIdx: number;
-    arrivalTime: number | undefined;
-    departureTime: number | undefined;
+  // 時刻情報を持つ停車/通過駅のインデックスを走査順に収集
+  const indices: number[] = [];
+  if (isNobori) {
+    for (let i = Math.min(times.length, stationCount) - 1; i >= 0; i--) {
+      const st = times[i];
+      if (st.stopType === StopType.NotOperate || st.stopType === StopType.Direct) continue;
+      if (st.arrival === undefined && st.departure === undefined) continue;
+      indices.push(i);
+    }
+  } else {
+    for (let i = 0; i < Math.min(times.length, stationCount); i++) {
+      const st = times[i];
+      if (st.stopType === StopType.NotOperate || st.stopType === StopType.Direct) continue;
+      if (st.arrival === undefined && st.departure === undefined) continue;
+      indices.push(i);
+    }
   }
-
-  // 時刻情報を持つ停車/通過駅のみ抽出
-  const stops: StopInfo[] = [];
-  for (let i = 0; i < Math.min(times.length, stationCount); i++) {
-    const st = times[i];
-    if (st.stopType === StopType.NotOperate || st.stopType === StopType.Direct) continue;
-    // 時刻が全くない通過駅はスキップ
-    if (st.arrival === undefined && st.departure === undefined) continue;
-    stops.push({
-      stationIdx: i,
-      arrivalTime: st.arrival,
-      departureTime: st.departure,
-    });
-  }
-
-  // 時刻順にソート（上り列車は駅インデックスと時刻順が逆）
-  stops.sort((a, b) => {
-    const tA = a.departureTime ?? a.arrivalTime!;
-    const tB = b.departureTime ?? b.arrivalTime!;
-    return tA - tB;
-  });
 
   // 連続する駅間のセグメントを生成
-  for (let i = 0; i < stops.length - 1; i++) {
-    const from = stops[i];
-    const to = stops[i + 1];
+  for (let k = 0; k < indices.length - 1; k++) {
+    const fromIdx = indices[k];
+    const toIdx = indices[k + 1];
+    const from = times[fromIdx];
+    const to = times[toIdx];
 
-    const startTime = from.departureTime ?? from.arrivalTime!;
-    const endTime = to.arrivalTime ?? to.departureTime!;
+    const startTime = from.departure ?? from.arrival!;
+    const endTime = to.arrival ?? to.departure!;
 
-    // 同時刻の場合はスキップ（分岐合流点など）
     if (endTime <= startTime) continue;
 
     segments.push({
-      startIdx: from.stationIdx,
-      endIdx: to.stationIdx,
+      startIdx: fromIdx,
+      endIdx: toIdx,
       startTime,
       endTime,
     });
@@ -74,9 +66,6 @@ function buildSegments(train: Train, stationCount: number): TrainSegment[] {
   return segments;
 }
 
-/**
- * 列車が指定時刻に走行中かどうか・位置を計算する。
- */
 function getTrainPosition(
   train: Train,
   segments: TrainSegment[],
@@ -87,15 +76,10 @@ function getTrainPosition(
   const firstSeg = segments[0];
   const lastSeg = segments[segments.length - 1];
 
-  // 始発駅の着時刻（着時刻があれば発車前の停車を表現）
-  const trainStart = Math.min(
-    firstSeg.startTime,
-    ...train.stationTimes
-      .filter((st) => st.arrival !== undefined || st.departure !== undefined)
-      .map((st) => st.arrival ?? st.departure!)
-  );
+  // 始発駅の最初の時刻
+  const firstStopTime = train.stationTimes[firstSeg.startIdx];
+  const trainStart = firstStopTime?.arrival ?? firstStopTime?.departure ?? firstSeg.startTime;
 
-  // 終着駅到着後も少し表示する
   const trainEnd = lastSeg.endTime + TERMINAL_DWELL_MINUTES;
 
   if (currentTime < trainStart || currentTime > trainEnd) return null;
@@ -124,7 +108,7 @@ function getTrainPosition(
   for (let i = 0; i < segments.length; i++) {
     const seg = segments[i];
 
-    // セグメント間の停車（前のセグメント到着 ～ このセグメント発車）
+    // セグメント間の停車
     if (i > 0) {
       const prevSeg = segments[i - 1];
       if (currentTime >= prevSeg.endTime && currentTime < seg.startTime) {
@@ -142,7 +126,6 @@ function getTrainPosition(
       const duration = seg.endTime - seg.startTime;
       const elapsed = currentTime - seg.startTime;
       const ratio = elapsed / duration;
-
       const progress = seg.startIdx + (seg.endIdx - seg.startIdx) * ratio;
 
       return {
@@ -156,10 +139,6 @@ function getTrainPosition(
   return null;
 }
 
-/**
- * シミュレーションエンジン。
- * 路線データを受け取り、任意の時刻における全列車の位置を計算する。
- */
 export class SimulationEngine {
   private route: Route;
   private diagramIndex: number;

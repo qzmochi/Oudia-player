@@ -309,6 +309,38 @@ export class CTCRenderer {
     ctx.fill();
   }
 
+  /** 指定座標にある列車を返す（クリック判定） */
+  hitTest(
+    cssX: number,
+    cssY: number,
+    positions: TrainPosition[]
+  ): TrainPosition | null {
+    const { config, stationX, trackY } = this;
+    const w = config.trainLabelWidth;
+    const h = config.trainLabelHeight;
+
+    for (const pos of positions) {
+      const train = pos.train;
+      const idx = Math.floor(pos.stationProgress);
+      const frac = pos.stationProgress - idx;
+      const x0 = stationX[Math.min(idx, stationX.length - 1)];
+      const x1 = stationX[Math.min(idx + 1, stationX.length - 1)];
+      const x = x0 + (x1 - x0) * frac;
+      const dirOffset = train.direction === "Kudari" ? -14 : 14;
+      const y = trackY + dirOffset;
+
+      if (
+        cssX >= x - w / 2 &&
+        cssX <= x + w / 2 &&
+        cssY >= y - h / 2 &&
+        cssY <= y + h / 2
+      ) {
+        return pos;
+      }
+    }
+    return null;
+  }
+
   /** Canvas サイズ変更に対応 */
   resize(width: number, height: number): void {
     this.canvas.width = width;
