@@ -93,11 +93,18 @@ function showTrainInfo(pos: TrainPosition): void {
 
   const nearestStation = Math.round(pos.stationProgress);
 
+  // 時刻付きの停車駅を収集し、時刻順にソート（始発→終着）
+  const stopsWithTime: { idx: number; time: number }[] = [];
   for (let i = 0; i < train.stationTimes.length; i++) {
     const st = train.stationTimes[i];
     if (st.stopType === StopType.NotOperate || st.stopType === StopType.Direct) continue;
     if (st.arrival === undefined && st.departure === undefined) continue;
+    stopsWithTime.push({ idx: i, time: st.departure ?? st.arrival! });
+  }
+  stopsWithTime.sort((a, b) => a.time - b.time);
 
+  for (const { idx: i } of stopsWithTime) {
+    const st = train.stationTimes[i];
     const stationName = currentRoute.stations[i]?.name ?? `駅${i}`;
     const cls = st.stopType === StopType.Stop ? "stop" : "pass";
     const isCurrent = i === nearestStation;
