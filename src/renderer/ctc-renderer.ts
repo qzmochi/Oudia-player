@@ -1,12 +1,12 @@
-import type { Route, Station, Train } from "../model/types";
+import type { Route, Train } from "../model/types";
 
-/** レンダラー設定 */
 export interface CTCRendererConfig {
   paddingX: number;
   paddingY: number;
   stationLabelHeight: number;
   mainTrackWidth: number;
   sideTrackWidth: number;
+  /** 駅構内ゾーンの幅(px) — 番線の分岐・合流区間 */
   stationZoneWidth: number;
   trainLabelWidth: number;
   trainLabelHeight: number;
@@ -14,8 +14,11 @@ export interface CTCRendererConfig {
   stationFontSize: number;
   /** 複線の上下間隔 */
   doubleTrackGap: number;
+  /** 駅構内の番線間隔 */
+  platformSpacing: number;
   bgColor: string;
   trackColor: string;
+  trackColorMain: string;
   stationLabelColor: string;
 }
 
@@ -25,28 +28,25 @@ const DEFAULT_CONFIG: CTCRendererConfig = {
   stationLabelHeight: 50,
   mainTrackWidth: 2.5,
   sideTrackWidth: 1.5,
-  stationZoneWidth: 40,
+  stationZoneWidth: 60,
   trainLabelWidth: 52,
   trainLabelHeight: 18,
   trainFontSize: 11,
   stationFontSize: 12,
   doubleTrackGap: 20,
+  platformSpacing: 14,
   bgColor: "#1a1a2e",
-  trackColor: "#666666",
+  trackColor: "#555555",
+  trackColorMain: "#777777",
   stationLabelColor: "#cccccc",
 };
 
-/** 列車標識の表示モード */
 export type TrainLabelMode = "number" | "type";
 
-/** 列車の現在位置 */
 export interface TrainPosition {
   train: Train;
-  /** 駅インデックス（小数で駅間を表現。3.5 = 駅3と駅4の中間） */
   stationProgress: number;
-  /** 使用中の番線インデックス（駅に停車中の場合） */
   trackIndex?: number;
-  /** 停車中かどうか */
   isStopped: boolean;
 }
 
@@ -57,6 +57,19 @@ function oudColorToCSS(oudColor: string | undefined, fallback: string): string {
   const g = oudColor.slice(4, 6);
   const b = oudColor.slice(2, 4);
   return `#${r}${g}${b}`;
+}
+
+/**
+ * 駅の番線レイアウト情報（事前計算）
+ * 各番線の Y オフセット（centerY=0 基準）
+ */
+interface StationLayout {
+  /** 番線ごとの Y オフセット（上が負、下が正） */
+  trackYOffsets: number[];
+  /** 下り本線の Y オフセット */
+  downMainY: number;
+  /** 上り本線の Y オフセット */
+  upMainY: number;
 }
 
 export class CTCRenderer {
@@ -70,6 +83,9 @@ export class CTCRenderer {
   private centerY = 0;
   private _labelMode: TrainLabelMode = "number";
 
+  /** 各駅のレイアウト情報 */
+  private stationLayouts: StationLayout[] = [];
+
   constructor(
     private canvas: HTMLCanvasElement,
     config?: Partial<CTCRendererConfig>
@@ -81,6 +97,7 @@ export class CTCRenderer {
   setRoute(route: Route): void {
     this.route = route;
     this.layoutStations();
+    this.buildStationLayouts();
   }
 
   set labelMode(mode: TrainLabelMode) {
@@ -119,12 +136,71 @@ export class CTCRenderer {
       );
     }
 
-    this.centerY = this.config.paddingY + this.config.stationLabelHeight + 40;
+    this.centerY = this.config.paddingY + this.config.stationLabelHeight + 50;
     this.upTrackY = this.centerY - doubleTrackGap / 2;
     this.downTrackY = this.centerY + doubleTrackGap / 2;
   }
 
-  /** フレーム描画 */
+  /** 各駅の番線 Y オフセットを事前計算 */
+  private buildStationLayouts(): void {
+    if (!this.route) return;
+    const { platformSpacing, doubleTrackGap } = this.config;
+
+    this.stationLayouts = this.route.stations.map((station) => {
+      const trackCount = Math.max(station.tracks.length, 1);
+      const downMain = station.downMain;
+      const upMain = station.upMain;
+
+      if (trackCount <= 1) {
+        // 1番線のみ（信号場等）
+        return {
+          trackYOffsets: [0],
+          downMainY: 0,
+          upMainY: 0,
+        };
+      }
+
+      // 番線の Y オフセットを計算
+      // downMain を下り線(下)の位置、upMain を上り線(上)の位置に配置
+      // その他の番線は間に配置
+      const offsets: number[] = new Array(trackCount).fill(0);
+
+      // 本線の位置を基準に配置
+      // upMain → upTrackY 相当 (負方向), downMain → downTrackY 相当 (正方向)
+      const halfGap = doubleTrackGap / 2;
+      offsets[upMain] = -halfGap;
+      offsets[downMain] = halfGap;
+
+      // 本線が同じ場合（単線駅）
+      if (upMain === downMain) {
+        offsets[upMain] = 0;
+      }
+
+      // その他の番線を配置
+      for (let t = 0; t < trackCount; t++) {
+        if (t === downMain || t === upMain) continue;
+        // 本線の外側に配置
+        if (t < Math.min(downMain, upMain)) {
+          // 上り本線より上
+          offsets[t] = offsets[upMain] - platformSpacing * (Math.min(downMain, upMain) - t);
+        } else if (t > Math.max(downMain, upMain)) {
+          // 下り本線より下
+          offsets[t] = offsets[downMain] + platformSpacing * (t - Math.max(downMain, upMain));
+        } else {
+          // 本線の間
+          const ratio = (t - upMain) / (downMain - upMain);
+          offsets[t] = offsets[upMain] + (offsets[downMain] - offsets[upMain]) * ratio;
+        }
+      }
+
+      return {
+        trackYOffsets: offsets,
+        downMainY: offsets[downMain],
+        upMainY: offsets[upMain],
+      };
+    });
+  }
+
   render(trainPositions: TrainPosition[], currentTimeMinutes: number): void {
     const { ctx, canvas, config } = this;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -153,68 +229,108 @@ export class CTCRenderer {
     ctx.fillText(timeStr, canvas.width - config.paddingX, config.paddingY - 10);
   }
 
-  /** 複線の線路と駅構内を描画 */
+  /** 線路と駅構内配線を描画 */
   private drawTracks(): void {
-    const { ctx, config, stationX, upTrackY, downTrackY } = this;
+    const { ctx, config, stationX } = this;
     if (!this.route) return;
 
-    const x0 = stationX[0];
-    const xN = stationX[stationX.length - 1];
+    const stations = this.route.stations;
 
-    // 上り線（上）
-    ctx.strokeStyle = config.trackColor;
-    ctx.lineWidth = config.mainTrackWidth;
-    ctx.beginPath();
-    ctx.moveTo(x0, upTrackY);
-    ctx.lineTo(xN, upTrackY);
-    ctx.stroke();
+    // 駅間の複線を描画
+    for (let i = 0; i < stations.length - 1; i++) {
+      const x0 = stationX[i];
+      const x1 = stationX[i + 1];
+      const zone0 = config.stationZoneWidth / 2;
+      const zone1 = config.stationZoneWidth / 2;
 
-    // 下り線（下）
-    ctx.beginPath();
-    ctx.moveTo(x0, downTrackY);
-    ctx.lineTo(xN, downTrackY);
-    ctx.stroke();
-
-    // 各駅のマーカー
-    for (let i = 0; i < this.route.stations.length; i++) {
-      this.drawStationMarker(this.route.stations[i], stationX[i]);
-    }
-  }
-
-  /** 駅のマーカーを描画 */
-  private drawStationMarker(station: Station, x: number): void {
-    const { ctx, config, upTrackY, downTrackY } = this;
-
-    // 駅の縦線（上り線～下り線を結ぶ）
-    ctx.strokeStyle = config.stationLabelColor;
-    ctx.lineWidth = 1;
-    ctx.globalAlpha = 0.4;
-    ctx.beginPath();
-    ctx.moveTo(x, upTrackY - 6);
-    ctx.lineTo(x, downTrackY + 6);
-    ctx.stroke();
-    ctx.globalAlpha = 1.0;
-
-    // 主要駅は太め表示
-    if (station.scale === "Ekikibo_Syuyou") {
-      ctx.strokeStyle = config.stationLabelColor;
-      ctx.lineWidth = 2;
-      ctx.globalAlpha = 0.7;
+      // 上り線
+      ctx.strokeStyle = config.trackColorMain;
+      ctx.lineWidth = config.mainTrackWidth;
       ctx.beginPath();
-      ctx.moveTo(x, upTrackY - 8);
-      ctx.lineTo(x, downTrackY + 8);
+      ctx.moveTo(x0 + zone0, this.upTrackY);
+      ctx.lineTo(x1 - zone1, this.upTrackY);
       ctx.stroke();
-      ctx.globalAlpha = 1.0;
+
+      // 下り線
+      ctx.beginPath();
+      ctx.moveTo(x0 + zone0, this.downTrackY);
+      ctx.lineTo(x1 - zone1, this.downTrackY);
+      ctx.stroke();
+    }
+
+    // 各駅の構内配線を描画
+    for (let i = 0; i < stations.length; i++) {
+      this.drawStationYard(i);
     }
   }
 
-  /** 駅名ラベルを描画 */
+  /** 駅構内の配線を描画 */
+  private drawStationYard(stationIdx: number): void {
+    const { ctx, config, stationX, centerY } = this;
+    if (!this.route) return;
+
+    const station = this.route.stations[stationIdx];
+    const layout = this.stationLayouts[stationIdx];
+    const x = stationX[stationIdx];
+    const halfZone = config.stationZoneWidth / 2;
+    const trackCount = Math.max(station.tracks.length, 1);
+
+    // 各番線を描画
+    for (let t = 0; t < trackCount; t++) {
+      const trackY = centerY + layout.trackYOffsets[t];
+      const isDownMain = t === station.downMain;
+      const isUpMain = t === station.upMain;
+      const isMain = isDownMain || isUpMain;
+
+      ctx.strokeStyle = isMain ? config.trackColorMain : config.trackColor;
+      ctx.lineWidth = isMain ? config.mainTrackWidth : config.sideTrackWidth;
+
+      // 左側分岐: 駅間の本線位置 → 番線位置
+      const entryFromY = isDownMain || (station.downMain === station.upMain && t === station.downMain)
+        ? this.downTrackY
+        : isUpMain
+        ? this.upTrackY
+        : trackY < 0
+        ? this.upTrackY
+        : this.downTrackY;
+
+      ctx.beginPath();
+      // 左側分岐
+      ctx.moveTo(x - halfZone, entryFromY);
+      ctx.lineTo(x - halfZone * 0.4, trackY);
+      // 番線の直線部分
+      ctx.lineTo(x + halfZone * 0.4, trackY);
+      // 右側合流
+      ctx.lineTo(x + halfZone, entryFromY);
+      ctx.stroke();
+
+      // 番線上にホーム表現（小さい四角）
+      if (trackCount > 1) {
+        ctx.fillStyle = isMain ? "#444466" : "#333355";
+        ctx.fillRect(x - halfZone * 0.3, trackY - 2, halfZone * 0.6, 4);
+      }
+    }
+
+    // 駅名の縦マーカー
+    ctx.strokeStyle = config.stationLabelColor;
+    ctx.globalAlpha = 0.3;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    const topY = centerY + Math.min(...layout.trackYOffsets) - 12;
+    const botY = centerY + Math.max(...layout.trackYOffsets) + 12;
+    ctx.moveTo(x, topY);
+    ctx.lineTo(x, botY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1.0;
+  }
+
   private drawStationLabels(): void {
     const { ctx, config, stationX } = this;
     if (!this.route) return;
 
     ctx.fillStyle = config.stationLabelColor;
-    ctx.textAlign = "center";
 
     for (let i = 0; i < this.route.stations.length; i++) {
       const station = this.route.stations[i];
@@ -224,7 +340,6 @@ export class CTCRenderer {
 
       ctx.font = `${isMajor ? "bold " : ""}${config.stationFontSize}px sans-serif`;
 
-      // 斜め表示
       ctx.save();
       ctx.translate(x, config.paddingY + 10);
       ctx.rotate(-Math.PI / 4);
@@ -234,14 +349,13 @@ export class CTCRenderer {
     }
   }
 
-  /** 列車標識を描画 */
   private drawTrains(positions: TrainPosition[]): void {
     for (const pos of positions) {
       this.drawTrainLabel(pos);
     }
   }
 
-  /** 列車の X 座標を計算 */
+  /** 列車の描画 X 座標 */
   private getTrainX(progress: number): number {
     const { stationX } = this;
     const idx = Math.floor(progress);
@@ -251,14 +365,38 @@ export class CTCRenderer {
     return x0 + (x1 - x0) * frac;
   }
 
-  /** 列車の Y 座標を取得（左側通行: 右行き=上線路, 左行き=下線路） */
-  private getTrainY(direction: "Kudari" | "Nobori"): number {
-    // Kudari = 駅インデックス昇順 = 右方向(→) = 上の線路
-    // Nobori = 駅インデックス降順 = 左方向(←) = 下の線路
-    return direction === "Kudari" ? this.upTrackY : this.downTrackY;
+  /**
+   * 列車の描画 Y 座標を計算。
+   * 駅に近づくと番線に向かって分岐、駅間では本線上。
+   */
+  private getTrainY(pos: TrainPosition): number {
+    const { centerY } = this;
+    const train = pos.train;
+    const isKudari = train.direction === "Kudari";
+
+    // 基本の走行 Y（左側通行: Kudari=上線路, Nobori=下線路）
+    const runningY = isKudari ? this.upTrackY : this.downTrackY;
+
+    // 駅に停車中 or 駅付近にいる場合、番線の Y に移動
+    const nearestIdx = Math.round(pos.stationProgress);
+    const distToStation = Math.abs(pos.stationProgress - nearestIdx);
+
+    if (distToStation < 0.4 && this.route && nearestIdx >= 0 && nearestIdx < this.route.stations.length) {
+      const layout = this.stationLayouts[nearestIdx];
+      const trackIdx = pos.trackIndex;
+
+      if (trackIdx !== undefined && trackIdx < layout.trackYOffsets.length) {
+        const platformY = centerY + layout.trackYOffsets[trackIdx];
+        // 駅に近づくにつれ番線位置へスムーズに移動
+        const t = 1 - distToStation / 0.4; // 0→1 (遠→近)
+        const eased = t * t * (3 - 2 * t); // smoothstep
+        return runningY + (platformY - runningY) * eased;
+      }
+    }
+
+    return runningY;
   }
 
-  /** 1つの列車標識を描画 */
   private drawTrainLabel(pos: TrainPosition): void {
     const { ctx, config } = this;
     if (!this.route) return;
@@ -268,36 +406,36 @@ export class CTCRenderer {
     const color = oudColorToCSS(trainType?.diagramLineColor, "#00ff00");
 
     const x = this.getTrainX(pos.stationProgress);
-    const baseY = this.getTrainY(train.direction);
-    // 列車標識を線路から外側にオフセット（Kudari=上線路→さらに上, Nobori=下線路→さらに下）
-    const labelOffset = train.direction === "Kudari" ? -14 : 14;
-    const y = baseY + labelOffset;
+    const y = this.getTrainY(pos);
 
     const w = config.trainLabelWidth;
     const h = config.trainLabelHeight;
-
-    // 方向三角 ◀ or ▶ を標識の左端/右端に表示
-    const isRight = train.direction === "Kudari"; // 下り = 右方向
+    const isRight = train.direction === "Kudari";
     const arrowW = 8;
 
-    // 背景矩形
+    // 背景
     ctx.fillStyle = color;
-    ctx.globalAlpha = 0.85;
+    ctx.globalAlpha = pos.isStopped ? 0.95 : 0.8;
     ctx.fillRect(x - w / 2, y - h / 2, w, h);
     ctx.globalAlpha = 1.0;
 
+    // 停車中インジケータ（枠）
+    if (pos.isStopped) {
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(x - w / 2, y - h / 2, w, h);
+    }
+
     // 方向三角
     ctx.fillStyle = "#ffffff";
-    ctx.globalAlpha = 0.7;
+    ctx.globalAlpha = 0.6;
     ctx.beginPath();
     if (isRight) {
-      // ▶ 右向き三角（標識の右端）
       const ax = x + w / 2 - arrowW - 2;
       ctx.moveTo(ax, y - 5);
       ctx.lineTo(ax + arrowW, y);
       ctx.lineTo(ax, y + 5);
     } else {
-      // ◀ 左向き三角（標識の左端）
       const ax = x - w / 2 + arrowW + 2;
       ctx.moveTo(ax, y - 5);
       ctx.lineTo(ax - arrowW, y);
@@ -313,35 +451,23 @@ export class CTCRenderer {
     const textOffsetX = isRight ? -arrowW / 2 : arrowW / 2;
 
     if (this._labelMode === "type") {
-      // 種別行先モード: 種別略称 + 行先
       const typeName = trainType?.shortName ?? trainType?.name ?? "";
       const shortType = typeName.length > 3 ? typeName.slice(0, 3) : typeName;
       ctx.font = `bold ${config.trainFontSize - 1}px sans-serif`;
       ctx.fillText(shortType, x + textOffsetX, y);
     } else {
-      // 列車番号モード
       ctx.font = `bold ${config.trainFontSize}px monospace`;
-      const label = train.number ?? "?";
-      ctx.fillText(label, x + textOffsetX, y);
+      ctx.fillText(train.number ?? "?", x + textOffsetX, y);
     }
   }
 
-  /** 指定座標にある列車を返す（クリック判定） */
-  hitTest(
-    cssX: number,
-    cssY: number,
-    positions: TrainPosition[]
-  ): TrainPosition | null {
-    const { config } = this;
-    const w = config.trainLabelWidth;
-    const h = config.trainLabelHeight;
+  hitTest(cssX: number, cssY: number, positions: TrainPosition[]): TrainPosition | null {
+    const w = this.config.trainLabelWidth;
+    const h = this.config.trainLabelHeight;
 
     for (const pos of positions) {
-      const train = pos.train;
       const x = this.getTrainX(pos.stationProgress);
-      const baseY = this.getTrainY(train.direction);
-      const labelOffset = train.direction === "Kudari" ? -14 : 14;
-      const y = baseY + labelOffset;
+      const y = this.getTrainY(pos);
 
       if (
         cssX >= x - w / 2 &&
