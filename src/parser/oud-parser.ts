@@ -89,16 +89,35 @@ function firstChild(node: RawNode, type: string): RawNode | undefined {
 
 // ---- time parsing ----
 
-/** "HHMM" or "HHMMSS" → 分単位 */
-function parseTime(s: string): number {
-  if (s.length === 4) {
-    return parseInt(s.slice(0, 2), 10) * 60 + parseInt(s.slice(2, 4), 10);
+/**
+ * OuDia 時刻文字列を分単位に変換する。
+ * - "HMM" (3桁) → 例: "953" = 9:53
+ * - "HHMM" (4桁) → 例: "1030" = 10:30
+ * - "HMMSS" (5桁) → 例: "95300" = 9:53:00
+ * - "HHMMSS" (6桁) → 例: "103000" = 10:30:00
+ * - 空文字列/不正 → undefined
+ */
+function parseTime(s: string): number | undefined {
+  if (!s || s.length < 3) return undefined;
+
+  let h: number, m: number;
+  if (s.length <= 4) {
+    // HMM or HHMM
+    const mm = s.slice(-2);
+    const hh = s.slice(0, -2);
+    h = parseInt(hh, 10);
+    m = parseInt(mm, 10);
+  } else {
+    // HMMSS or HHMMSS — 秒は切り捨て
+    const withoutSec = s.slice(0, -2);
+    const mm = withoutSec.slice(-2);
+    const hh = withoutSec.slice(0, -2);
+    h = parseInt(hh, 10);
+    m = parseInt(mm, 10);
   }
-  if (s.length === 6) {
-    // 秒精度は切り捨て
-    return parseInt(s.slice(0, 2), 10) * 60 + parseInt(s.slice(2, 4), 10);
-  }
-  return 0;
+
+  if (isNaN(h) || isNaN(m)) return undefined;
+  return h * 60 + m;
 }
 
 // ---- EkiJikoku parsing ----
