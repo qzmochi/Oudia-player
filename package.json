@@ -1,0 +1,26 @@
+{
+  "name": "oudia-player",
+  "version": "1.0.0",
+  "description": "OuDiaデータをCTC風在線図としてリアルタイム再生するアプリ",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/qzmochi/Oudia-player.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/qzmochi/Oudia-player/issues"
+  },
+  "homepage": "https://github.com/qzmochi/Oudia-player#readme",
+  "devDependencies": {
+    "typescript": "^6.0.2",
+    "vite": "^8.0.3"
+  }
+}
