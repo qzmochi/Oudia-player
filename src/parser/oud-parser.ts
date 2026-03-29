@@ -125,32 +125,43 @@ function parseTime(s: string): number | undefined {
 /**
  * EkiJikoku の1駅分をパースする。
  *
- * 書式: "停車種別;着時刻/発時刻"
+ * 書式: "停車種別;着時刻/発時刻$番線"
  * - 空文字列 → 運行なし
  * - "1;HHMM" → 停車、発のみ
  * - "1;HHMM/HHMM" → 停車、着/発
+ * - "1;HHMM$N" → 停車、発のみ、番線N
  * - "2" → 通過、時刻なし
  * - "2;HHMM" → 通過、時刻あり
+ * - "2$N" → 通過、番線N
  */
 function parseStationTime(s: string): StationTime {
   if (s === "") {
     return { stopType: StopType.NotOperate };
   }
 
-  const semiIdx = s.indexOf(";");
-  if (semiIdx === -1) {
-    // 数字のみ（"2" = 通過, "3" = 経由なし 等）
-    const stopType = parseInt(s, 10) as StopType;
-    return { stopType };
+  // $N の番線指定を分離
+  let trackIndex: number | undefined;
+  let body = s;
+  const dollarIdx = s.indexOf("$");
+  if (dollarIdx !== -1) {
+    const trackStr = s.slice(dollarIdx + 1);
+    trackIndex = parseInt(trackStr, 10);
+    if (isNaN(trackIndex)) trackIndex = undefined;
+    body = s.slice(0, dollarIdx);
   }
 
-  const stopType = parseInt(s.slice(0, semiIdx), 10) as StopType;
-  const timePart = s.slice(semiIdx + 1);
+  const semiIdx = body.indexOf(";");
+  if (semiIdx === -1) {
+    const stopType = parseInt(body, 10) as StopType;
+    return { stopType, trackIndex };
+  }
+
+  const stopType = parseInt(body.slice(0, semiIdx), 10) as StopType;
+  const timePart = body.slice(semiIdx + 1);
   const slashIdx = timePart.indexOf("/");
 
   if (slashIdx === -1) {
-    // 発のみ or 通過時刻
-    return { stopType, departure: parseTime(timePart) };
+    return { stopType, departure: parseTime(timePart), trackIndex };
   }
 
   const arrStr = timePart.slice(0, slashIdx);
@@ -159,6 +170,7 @@ function parseStationTime(s: string): StationTime {
     stopType,
     arrival: arrStr ? parseTime(arrStr) : undefined,
     departure: depStr ? parseTime(depStr) : undefined,
+    trackIndex,
   };
 }
 
