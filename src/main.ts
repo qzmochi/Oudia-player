@@ -3,6 +3,7 @@ import { CTCRenderer, type TrainPosition, type TrainLabelMode } from "./renderer
 import { SimulationEngine } from "./simulation/engine";
 import { StopType } from "./model/types";
 import type { Route } from "./model/types";
+import { type RouteExtension, buildTrackCountMap } from "./model/extension";
 
 // ---- DOM elements ----
 
@@ -25,6 +26,7 @@ const btnLabelMode = document.getElementById("btn-label-mode") as HTMLButtonElem
 let renderer: CTCRenderer | null = null;
 let engine: SimulationEngine | null = null;
 let currentRoute: Route | null = null;
+let currentExtension: RouteExtension | null = null;
 let lastPositions: TrainPosition[] = [];
 let isPlaying = false;
 let playSpeed = 1;
@@ -130,13 +132,46 @@ function showTrainInfo(pos: TrainPosition): void {
 
 // ---- file loading ----
 
+/** 拡張ファイル (.ext.json) を読み込んで適用 */
+async function loadExtension(file: File): Promise<void> {
+  try {
+    const text = await file.text();
+    currentExtension = JSON.parse(text) as RouteExtension;
+
+    if (renderer && currentRoute) {
+      applyExtension();
+      renderFrame();
+    }
+    routeInfo.textContent = (routeInfo.textContent ?? "") + " [拡張情報適用]";
+  } catch (e) {
+    console.error("拡張ファイル読み込みエラー:", e);
+  }
+}
+
+function applyExtension(): void {
+  if (!renderer || !currentRoute || !currentExtension) return;
+  const stationNames = currentRoute.stations.map((s) => s.name);
+  const trackMap = buildTrackCountMap(currentExtension, stationNames);
+  renderer.setSectionTrackCount(trackMap);
+}
+
 async function loadFile(file: File): Promise<void> {
+  // .ext.json は拡張ファイルとして処理
+  if (file.name.endsWith(".ext.json") || file.name.endsWith(".json")) {
+    return loadExtension(file);
+  }
+
   try {
     const result = await parseOudiaFile(file);
     currentRoute = result.route;
 
     renderer = new CTCRenderer(canvas);
     renderer.setRoute(currentRoute);
+
+    // 拡張情報があれば再適用
+    if (currentExtension) {
+      applyExtension();
+    }
 
     engine = new SimulationEngine(currentRoute, 0);
     minTime = engine.getEarliestTime();
@@ -243,8 +278,11 @@ canvas.addEventListener("click", (e) => {
 // ---- file input ----
 
 fileInput.addEventListener("change", () => {
-  const file = fileInput.files?.[0];
-  if (file) loadFile(file);
+  const files = fileInput.files;
+  if (!files) return;
+  for (let i = 0; i < files.length; i++) {
+    loadFile(files[i]);
+  }
 });
 
 // ---- drag & drop ----
@@ -260,8 +298,11 @@ container.addEventListener("dragleave", () => {
 container.addEventListener("drop", (e) => {
   e.preventDefault();
   dropOverlay.classList.remove("drag-hover");
-  const file = e.dataTransfer?.files[0];
-  if (file) loadFile(file);
+  const files = e.dataTransfer?.files;
+  if (!files) return;
+  for (let i = 0; i < files.length; i++) {
+    loadFile(files[i]);
+  }
 });
 
 // ---- keyboard shortcuts ----

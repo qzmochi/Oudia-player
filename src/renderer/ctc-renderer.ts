@@ -85,6 +85,8 @@ export class CTCRenderer {
 
   /** 各駅のレイアウト情報 */
   private stationLayouts: StationLayout[] = [];
+  /** 駅間の線路本数 (stationIndex → tracks, default 2) */
+  private sectionTrackCount: Map<number, number> = new Map();
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -98,6 +100,11 @@ export class CTCRenderer {
     this.route = route;
     this.layoutStations();
     this.buildStationLayouts();
+  }
+
+  /** 駅間の線路本数マップを設定 */
+  setSectionTrackCount(map: Map<number, number>): void {
+    this.sectionTrackCount = map;
   }
 
   set labelMode(mode: TrainLabelMode) {
@@ -239,26 +246,35 @@ export class CTCRenderer {
 
     const stations = this.route.stations;
 
-    // 駅間の複線を描画
+    // 駅間の線路を描画（単線/複線に応じて）
     for (let i = 0; i < stations.length - 1; i++) {
       const x0 = stationX[i];
       const x1 = stationX[i + 1];
       const zone0 = config.stationZoneWidth / 2;
       const zone1 = config.stationZoneWidth / 2;
+      const tracks = this.sectionTrackCount.get(i) ?? 2;
 
-      // 上り線
       ctx.strokeStyle = config.trackColorMain;
       ctx.lineWidth = config.mainTrackWidth;
-      ctx.beginPath();
-      ctx.moveTo(x0 + zone0, this.upTrackY);
-      ctx.lineTo(x1 - zone1, this.upTrackY);
-      ctx.stroke();
 
-      // 下り線
-      ctx.beginPath();
-      ctx.moveTo(x0 + zone0, this.downTrackY);
-      ctx.lineTo(x1 - zone1, this.downTrackY);
-      ctx.stroke();
+      if (tracks === 1) {
+        // 単線: 中央1本
+        ctx.beginPath();
+        ctx.moveTo(x0 + zone0, this.centerY);
+        ctx.lineTo(x1 - zone1, this.centerY);
+        ctx.stroke();
+      } else {
+        // 複線: 上下2本
+        ctx.beginPath();
+        ctx.moveTo(x0 + zone0, this.upTrackY);
+        ctx.lineTo(x1 - zone1, this.upTrackY);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(x0 + zone0, this.downTrackY);
+        ctx.lineTo(x1 - zone1, this.downTrackY);
+        ctx.stroke();
+      }
     }
 
     // 各駅の構内配線を描画
@@ -385,8 +401,16 @@ export class CTCRenderer {
     const train = pos.train;
     const isKudari = train.direction === "Kudari";
 
-    // 基本の走行 Y（左側通行: Kudari=上線路, Nobori=下線路）
-    const runningY = isKudari ? this.upTrackY : this.downTrackY;
+    // 基本の走行 Y
+    // 単線区間: 中央を走行（上下で少しオフセット）
+    // 複線区間: 左側通行（Kudari=上線路, Nobori=下線路）
+    const sectionIdx = Math.floor(pos.stationProgress);
+    const sectionTracks = this.sectionTrackCount.get(
+      Math.min(Math.max(sectionIdx, 0), (this.route?.stations.length ?? 1) - 2)
+    ) ?? 2;
+    const runningY = sectionTracks === 1
+      ? this.centerY + (isKudari ? -4 : 4)  // 単線: 中央で上下が少しずれる
+      : isKudari ? this.upTrackY : this.downTrackY;
 
     // 駅に停車中 or 駅付近にいる場合、番線の Y に移動
     const nearestIdx = Math.round(pos.stationProgress);
